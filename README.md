@@ -34,6 +34,9 @@ The format is
 ```
 <Config Name>: <config1 setting> | <config2 setting>
 ```
+
 `<config setting>` maybe the value in config or `_N_SET` or `_N_EXIST`
+
 `_N_SET` means the config is `# CONFIG_xxxx is not set`
+
 `_N_EXIST` means the config is not exist in this config
