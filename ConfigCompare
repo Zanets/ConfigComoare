@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+from datetime import datetime
+from enum import Enum
+
+class CType(Enum):
+    NOT_EXIST = 0
+    NOT_SET = 1
+    Normal = 2
+
+class cfg_t:
+    def __init__(self, type=CType.NOT_EXIST, name=None, value=None):
+        self._type   = type 
+        self._name   = name
+        self._value  = value
+
+    @property
+    def name(self):
+        if self._type == CType.NOT_EXIST:
+            return None
+        else:
+            return self._name
+    
+    @property
+    def type(self):
+        return self._type
+    
+    @property
+    def value(self):
+        if self._type == CType.Normal:
+            return self._value
+        else:
+            return None
+
+    def __str__(self):
+        if self._type == CType.NOT_EXIST:
+            return "_N_EXIST"
+        elif self._type == CType.NOT_SET:
+            return "_N_SET"
+        else:
+            return self._value
+
+
+
+
+def parse(fp):
+    igns = []
+    cfgs = []
+    
+    f = open(fp, "r")
+
+    for line in f:
+        line = line.strip()
+
+        if len(line) == 0:
+            continue
+ 
+        if line.startswith("#"):
+            tokens = line.split(" ")
+            if len(tokens) == 5 and line.endswith("is not set"):
+                # config not set
+                cfg = cfg_t(CType.NOT_SET, tokens[1])
+                cfgs.append(cfg)
+            else:
+                # a comment
+                igns.append(line)
+        else:
+            # config with value
+            tokens = line.split("=")
+            cfg = cfg_t(CType.Normal, tokens[0], tokens[1])
+            cfgs.append(cfg)
+    
+    f.close()
+
+    return cfgs, igns
+
+def p_header(f, total):
+    l1 = "ConfigCompare Generated File"
+    l2 = "Date: %s" % datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    l3 = "Total: %d" % total
+    l4 = "FILE 1: %s" % f1_fp
+    l5 = "FILE 2: %s" % f2_fp
+    length = max(len(l1), len(l2))
+    length = max(length, len(l3))
+    length = max(length, len(l4))
+    length = max(length, len(l5))
+    print("#" * (length + 4), file=f)
+    print("# %s #" % l1.ljust(length), file=f)
+    print("# %s #" % l2.ljust(length), file=f)
+    print("# %s #" % l3.ljust(length), file=f)
+    print("# %s #" % l4.ljust(length), file=f)
+    print("# %s #" % l5.ljust(length), file=f)
+    print("#" * (length + 4), file=f)
+    print(file=f)
+
+def p_igns(fp, igns, fname):
+    with open(fp, "w") as f:
+        p_header(f, len(igns))
+        for ign in igns:
+            print("%s" % ign, file=f)
+        
+
+def p_cfg(fp, cfgs):
+    with open(fp, "w") as f:
+        p_header(f, len(cfgs))
+        for cfg in cfgs:
+            print("%s: %s" % (cfg.name, cfg), file=f)
+
+
+def help():
+    print("Usage: ConfigCompare <file 1> <file 2> [destination folder]")
+    print("    Note: Configs Follow File 1's order.")
+
+def p_diff(fp, cfgs):
+    with open(fp, "w") as f:
+        p_header(f, len(cfgs))
+        for cfg in cfgs:
+            # 1. It's not possible that both config are not exist. Mostly program error. 
+            assert cfg[0].type != CType.NOT_EXIST or cfg[1].type != CType.NOT_EXIST, "Both not exist, it should not happened !!!"
+            # 2. If both config are exist, then the name must be the same
+            if cfg[0].type != CType.NOT_EXIST and cfg[1].type != CType.NOT_EXIST:
+                assert cfg[0].name == cfg[1].name, "Both name must be the same"
+            name = cfg[0].name == None and cfg[1].name or cfg[0].name
+            # 3. Now, config must be different
+            assert cfg[0] != cfg[1], "Config must be different"
+            print("%s: %s | %s" % (name, cfg[0], cfg[1]), file=f)
+        
+
+
+def main():
+    tA = [] # same
+    tDiff = []
+    ext = "conf"
+    
+    if len(sys.argv) < 3:
+        help()
+        return
+
+    global f1_fp
+    global f2_fp
+    f1_fp = sys.argv[1]
+    f2_fp = sys.argv[2]
+
+    f1_fname = os.path.basename(f1_fp)
+    f2_fname = os.path.basename(f2_fp)
+
+    subdir = '.'
+    if len(sys.argv) > 3:
+        subdir = sys.argv[3]
+        if not os.path.isdir(subdir):
+            os.makedirs(subdir)
+
+    f1_cfgs, f1_igns = parse(f1_fp)
+    f2_cfgs, f2_igns = parse(f2_fp)
+    
+    for f1_cfg in f1_cfgs:
+        is_found = False
+        for f2_cfg in f2_cfgs:
+            assert f1_cfg.type != CType.NOT_EXIST and f2_cfg.type != CType.NOT_EXIST, "It's not possible to see not exist config."
+            if f1_cfg.name == f2_cfg.name:
+                is_found = True
+                if f1_cfg.value == f2_cfg.value:
+                    tA.append(f1_cfg)
+                else:
+                    tDiff.append([f1_cfg, f2_cfg])
+                f2_cfgs.remove(f2_cfg)
+        if not is_found:
+            tDiff.append([f1_cfg, cfg_t(CType.NOT_EXIST)])
+    for f2_cfg in f2_cfgs:
+        tDiff.append([cfg_t(CType.NOT_EXIST), f2_cfg])
+   
+    p_igns("%s/f1.igns.%s" % (subdir, ext), f1_igns, f1_fname)
+    p_igns("%s/f2.igns.%s" % (subdir, ext), f2_igns, f2_fname)
+    p_cfg("%s/same.%s" % (subdir, ext), tA)
+    p_diff("%s/diff.%s" % (subdir, ext), tDiff)
+
+main()
